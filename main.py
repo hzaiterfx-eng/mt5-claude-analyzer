@@ -141,8 +141,7 @@ async def analyze_market(data: CandleData):
 
         analyses_store.append(analysis.dict())
         if len(analyses_store) > 100:
-            analyses_store.
-            pop(0)
+            analyses_store.pop(0)
 
         await send_telegram(analysis)
 
