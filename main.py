@@ -4,6 +4,7 @@ from pydantic import BaseModel
 from typing import Optional
 import anthropic
 import os
+import httpx
 from datetime import datetime
 
 app = FastAPI(title="MT5 Claude Analyzer")
@@ -17,7 +18,9 @@ app.add_middleware(
 
 client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
 
-# Store last analyses in memory (use Redis/DB in production)
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
+
 analyses_store = []
 
 class CandleData(BaseModel):
@@ -42,7 +45,7 @@ class AnalysisResponse(BaseModel):
     symbol: str
     timeframe: str
     timestamp: str
-    signal: str  # BUY / SELL / NEUTRAL
+    signal: str
     trend: str
     entry: Optional[float] = None
     stop_loss: Optional[float] = None
@@ -50,20 +53,52 @@ class AnalysisResponse(BaseModel):
     support_levels: list[float] = []
     resistance_levels: list[float] = []
     summary: str
-    confidence: int  # 0-100
+    confidence: int
+
+async def send_telegram(analysis):
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+        return
+
+    signal_emoji = {"BUY": "🟢", "SELL": "🔴", "NEUTRAL": "🟡"}.get(analysis.signal, "⚪")
+    
+    msg = f"""
+{signal_emoji} *{analysis.symbol} | {analysis.timeframe}*
+━━━━━━━━━━━━━━━
+📊 *Signal:* {analysis.signal}
+📈 *Trend:* {analysis.trend}
+🎯 *Confidence:* {analysis.confidence}%
+
+💰 *Entry:* {analysis.entry or 'N/A'}
+🛑 *Stop Loss:* {analysis.stop_loss or 'N/A'}
+✅ *Take Profit:* {analysis.take_profit or 'N/A'}
+
+📝 {analysis.summary}
+━━━━━━━━━━━━━━━
+🕐 {analysis.timestamp}
+"""
+
+    async with httpx.AsyncClient() as c:
+        await c.post(
+            f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
+            json={
+                "chat_id": TELEGRAM_CHAT_ID,
+                "text": msg,
+                "parse_mode": "Markdown"
+            }
+        )
 
 @app.post("/analyze", response_model=AnalysisResponse)
 async def analyze_market(data: CandleData):
     prompt = f"""
 أنت محلل فوركس خبير. حلل هذه البيانات وأعطني تحليلاً دقيقاً.
 
-**الزوج:** {data.symbol} | **الإطار الزمني:** {data.timeframe}
+الزوج: {data.symbol} | الإطار الزمني: {data.timeframe}
 
-**بيانات الشمعة الحالية:**
+بيانات الشمعة الحالية:
 - Open: {data.open} | High: {data.high} | Low: {data.low} | Close: {data.close}
 - Volume: {data.volume}
 
-**المؤشرات الفنية:**
+المؤشرات الفنية:
 - RSI: {data.rsi or 'غير متوفر'}
 - MA20: {data.ma20 or 'غير متوفر'} | MA50: {data.ma50 or 'غير متوفر'} | MA200: {data.ma200 or 'غير متوفر'}
 - MACD: {data.macd or 'غير متوفر'} | Signal: {data.macd_signal or 'غير متوفر'}
@@ -106,7 +141,10 @@ async def analyze_market(data: CandleData):
 
         analyses_store.append(analysis.dict())
         if len(analyses_store) > 100:
-            analyses_store.pop(0)
+            analyses_store.
+            pop(0)
+
+        await send_telegram(analysis)
 
         return analysis
 
