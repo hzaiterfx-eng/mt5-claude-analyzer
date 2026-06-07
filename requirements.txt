@@ -3,4 +3,4 @@ uvicorn
 anthropic
 pydantic
 python-multipart
-HTTP
+HTTPX
